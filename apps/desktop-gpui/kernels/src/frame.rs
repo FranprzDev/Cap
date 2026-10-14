@@ -89,12 +89,17 @@ pub fn downsample_nearest(
 ) -> Vec<u8> {
     let target_width = target_width as usize;
     let target_height = target_height as usize;
-    let mut pixels = Vec::with_capacity(target_width * target_height * 4);
-    for y in 0..target_height {
+    let offsets: Vec<usize> = (0..target_width)
+        .map(|x| x * width / target_width * 4)
+        .collect();
+    let mut pixels = vec![0; target_width * target_height * 4];
+    for (y, output) in pixels
+        .chunks_exact_mut((target_width * 4).max(1))
+        .enumerate()
+    {
         let row = &data[y * height / target_height * stride..];
-        for x in 0..target_width {
-            let offset = x * width / target_width * 4;
-            pixels.extend_from_slice(&row[offset..offset + 4]);
+        for (target, &offset) in output.chunks_exact_mut(4).zip(&offsets) {
+            target.copy_from_slice(&row[offset..offset + 4]);
         }
     }
     pixels
@@ -250,6 +255,33 @@ mod tests {
             downsample_nearest(&source, 4, 4, 16, 2, 2),
             vec![0, 0, 0, 255, 2, 0, 0, 255, 0, 2, 0, 255, 2, 2, 0, 255]
         );
+    }
+
+    #[test]
+    fn downsample_samples_the_nearest_source_pixel_for_uneven_ratios() {
+        let (width, height, stride) = (7, 5, 7 * 4 + 12);
+        let source: Vec<u8> = (0..stride * height).map(|i| i as u8).collect();
+        for (target_width, target_height) in [(3, 2), (5, 4), (7, 5), (10, 8), (0, 3), (3, 0)] {
+            let expected: Vec<u8> = (0..target_height)
+                .flat_map(|y| (0..target_width).map(move |x| (x, y)))
+                .flat_map(|(x, y)| {
+                    let offset = y * height / target_height * stride + x * width / target_width * 4;
+                    source[offset..offset + 4].to_vec()
+                })
+                .collect();
+            assert_eq!(
+                downsample_nearest(
+                    &source,
+                    width,
+                    height,
+                    stride,
+                    target_width as u32,
+                    target_height as u32
+                ),
+                expected,
+                "{target_width}x{target_height}"
+            );
+        }
     }
 
     const PADDED: [u8; 20] = [
